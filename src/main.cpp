@@ -3,11 +3,15 @@
 
 #include "Adafruit_SHT31.h"
 #include <DHTesp.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 #include "secrets.h"
 
 //#define DHT
-#define SHT31
+//#define SHT31
+#define DS18b20
+
 
 #ifdef DHT
 DHTesp dht; 
@@ -17,14 +21,20 @@ DHTesp dht;
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 #endif
 
+#ifdef DS18b20
+#define ONE_WIRE_BUS D7  //D7
+OneWire oneWire(ONE_WIRE_BUS); 
+DallasTemperature sensors(&oneWire);
+#endif
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-const char* host = "temp_sensor_04";
+const char* host = "temp_sensor_05";
 const char* mqtt_clientid = host;
-const char* topic = "sensor/temp_sensor_04";
-const char* temperature_topic = "sensor/temp_sensor_04/temperature";
-const char* humidity_topic = "sensor/temp_sensor_04/humidity";
+const char* topic = "sensor/temp_sensor_05";
+const char* temperature_topic = "sensor/temp_sensor_05/temperature";
+const char* humidity_topic = "sensor/temp_sensor_05/humidity";
 
 const int wifi_retry_ms = 500;
 const int mqtt_retry_ms = 150;
@@ -74,7 +84,7 @@ void setup() {
   setup_mqtt();
 
   #ifdef DHT
-  dht.setup(13, DHTesp::DHT22);
+    dht.setup(13, DHTesp::DHT22);
   #endif
 
   #ifdef SHT31
@@ -82,6 +92,10 @@ void setup() {
     Serial.println("Couldn't find SHT31");
     while (1) delay(1);
   }
+  #endif
+
+  #ifdef DS18b20
+    sensors.begin();
   #endif
 }
 
@@ -111,8 +125,14 @@ void get_sensor_temperature(){
   }
   #endif
 
-  #if defined DHT || defined SHT31
-  Serial.print("Temp: "); Serial.println(temperature);
+  #ifdef DS18b20
+    sensors.requestTemperatures();
+    float temperature = sensors.getTempCByIndex(0);
+    float temperature_f = c2f(temperature);
+  #endif
+
+  #if defined DHT || defined SHT31 || defined DS18b20
+  Serial.print("Temp: "); Serial.println(temperature_f);
 
   char temperature_str[16];
   snprintf(temperature_str, sizeof(temperature_str), "%.2f", temperature_f);
