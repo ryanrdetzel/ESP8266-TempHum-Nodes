@@ -12,9 +12,8 @@
 //#define SHT31
 #define DS18b20
 
-
 #ifdef DHT
-DHTesp dht; 
+DHTesp dht;
 #endif
 
 #ifdef SHT31
@@ -22,7 +21,7 @@ Adafruit_SHT31 sht31 = Adafruit_SHT31();
 #endif
 
 #ifdef DS18b20
-#define ONE_WIRE_BUS D7  //D7
+#define ONE_WIRE_BUS 4  // D2
 OneWire oneWire(ONE_WIRE_BUS); 
 DallasTemperature sensors(&oneWire);
 #endif
@@ -30,17 +29,24 @@ DallasTemperature sensors(&oneWire);
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-const char* host = "temp_sensor_05";
+const char* host = "temp_sensor_04";
 const char* mqtt_clientid = host;
-const char* topic = "sensor/temp_sensor_05";
-const char* temperature_topic = "sensor/temp_sensor_05/temperature";
-const char* humidity_topic = "sensor/temp_sensor_05/humidity";
+const char* topic = "sensor/temp_sensor_04";
+const char* temperature_topic = "sensor/temp_sensor_04/temperature";
+const char* humidity_topic = "sensor/temp_sensor_04/humidity";
 
 const int wifi_retry_ms = 500;
 const int mqtt_retry_ms = 150;
-const int wait_between_messages = 60000; // milliseconds
+const int wait_between_messages = 30000; // milliseconds
+const int wait_between_readings = 2000;
 
-int time_since_last_read = wait_between_messages;
+int time_since_last_read = 0;
+int time_since_last_send = 0;
+
+// Storage for each individual reading.
+const int number_of_readings = wait_between_messages/wait_between_readings;
+float temperature_readings[number_of_readings];
+int temperature_readings_count = 0;
 
 void setup_wifi() {
   Serial.println();
@@ -97,6 +103,9 @@ void setup() {
   #ifdef DS18b20
     sensors.begin();
   #endif
+
+  for (int x=0;x<number_of_readings;x++)
+    temperature_readings[x] = 0;
 }
 
 float c2f(float temperature){
@@ -108,7 +117,7 @@ void get_sensor_temperature(){
   float humidity = dht.getHumidity();
   float temperature = dht.getTemperature();
   float temperature_f = c2f(temperature);
-
+  
   if (isnan(humidity) || isnan(temperature)) {
     Serial.println("Failed to read from DHT sensor!");
     return;
@@ -132,30 +141,57 @@ void get_sensor_temperature(){
   #endif
 
   #if defined DHT || defined SHT31 || defined DS18b20
-  Serial.print("Temp: "); Serial.println(temperature_f);
-
-  char temperature_str[16];
-  snprintf(temperature_str, sizeof(temperature_str), "%.2f", temperature_f);
-  client.publish(temperature_topic, temperature_str);
+  temperature_readings[temperature_readings_count++] = temperature_f;
+  if (temperature_readings_count >= number_of_readings){
+    temperature_readings_count = 0;
+    for (int x=0;x<number_of_readings;x++)
+      temperature_readings[x] = 0;
+  }
   #endif
 
-  #if defined DHT || defined SHT31
-  Serial.print("humidity: "); Serial.println(humidity);
-  char humidity_str[16];
-  snprintf(humidity_str, sizeof(humidity_str), "%.2f", humidity);
-  client.publish(humidity_topic, humidity_str);
-  #endif
+  // #if defined DHT || defined SHT31
+  // Serial.print("humidity: "); Serial.println(humidity);
+  // char humidity_str[16];
+  // snprintf(humidity_str, sizeof(humidity_str), "%.2f", humidity);
+  // client.publish(humidity_topic, humidity_str);
+  // #endif
 }
 
 
 void loop() {
-  if(time_since_last_read > wait_between_messages) {
+
+  if (time_since_last_read > wait_between_readings){
     get_sensor_temperature();
     time_since_last_read = 0;
   }
 
-  delay(100);
+  if(time_since_last_send > wait_between_messages) {
+    // Cacluate average from last sample set.
+    #if defined DHT || defined SHT31 || defined DS18b20
+      float temperature_total = 0;
+      int count = 0;
+
+      for (int x=0;x<number_of_readings;x++){
+        if (temperature_readings[x] > 0){
+          temperature_total += temperature_readings[x];
+          count++;
+        }
+      }
+      float temperature_f = temperature_total / count;
+
+      Serial.print("Temp: "); Serial.println(temperature_f);
+      char temperature_str[16];
+      snprintf(temperature_str, sizeof(temperature_str), "%.2f", temperature_f);
+      client.publish(temperature_topic, temperature_str);
+    #endif
+
+    time_since_last_send = 0;
+  }
+
+  delay(100); // 100 Const?
+
   time_since_last_read += 100;
+  time_since_last_send += 100;
 
   if (!client.connected()) {
     setup_mqtt();
